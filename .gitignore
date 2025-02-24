@@ -1,0 +1,4 @@
+#config files and venv
+.python/
+*.pycq
+*.csv
