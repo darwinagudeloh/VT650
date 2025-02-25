@@ -295,8 +295,8 @@ class VT650App(QMainWindow, Ui_MainWindow):
     
     def update_plot(self):
         if not self.df.empty:
-            # Extraer los últimos 200 datos
-            df_plot = self.df.tail(200)
+            # Extraer los últimos 500 datos
+            df_plot = self.df.tail(500)
             
             # Calcular el eje x en segundos
             sample_rate = float(self.samplerate)  # Asegurarse de que samplerate sea un número
