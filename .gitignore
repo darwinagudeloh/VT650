@@ -1,4 +1,6 @@
 #config files and venv
 .python/
+__pycache__/
+src/gui/__pycache__/
 *.pycq
 *.csv

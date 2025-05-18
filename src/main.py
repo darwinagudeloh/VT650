@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QGraphicsS
 from PySide6.QtCore import QTimer, QThread, Signal
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from ui_gui import Ui_MainWindow
+from gui.main_window import Ui_MainWindow
 
 class SerialThread(QThread):
     data_received = Signal(str)  # Señal para emitir los datos recibidos
@@ -171,41 +171,60 @@ class VT650App(QMainWindow, Ui_MainWindow):
             time.sleep(0.01)
             line = self.serial_conn.readline().decode('utf-8').strip()
             if line != 'RMAIN':
-                QMessageBox.critical(self, "Error", "No se pudo establecer la conexión con el Fluke VT650. REMOTE")
                 self.serial_conn.close()
-                return
+                                
+                #intentar en ultrafast
+                self.serial_conn = serial.Serial(
+                    port=port,
+                    baudrate=921600,
+                    timeout=1,
+                    rtscts=True
+                )
+                self.serial_conn.reset_input_buffer()
+                self.serial_conn.reset_output_buffer() 
 
-            # Configurar el puerto serial
-            self.serial_conn.write(b'UARTFAST=TRUE\n')
-            time.sleep(0.01)
-            self.serial_conn.close()
-
-            self.serial_conn = serial.Serial(
-                port=port,
-                baudrate=921600,
-                timeout=1,
-                rtscts=True
-            )
-            self.serial_conn.reset_input_buffer()
-            self.serial_conn.reset_output_buffer()
-
-            line = self.serial_conn.read(2).decode('utf-8')
-
-            if 'A' in line:
-                self.serial_conn.write(b'A')
+                # Enviar el comando Remote
+                self.serial_conn.write(b'REMOTE\n')
                 time.sleep(0.01)
-            else:
-                QMessageBox.critical(self,"Error", "No se pudo establecer la conexión con el Fluke VT650. UARTFAST-1")
-                self.serial_conn.close()
-                return    
+                line = self.serial_conn.readline().decode('utf-8').strip()
+                if line != 'RMAIN':
+                    QMessageBox.critical(self, "Error", "No se pudo establecer la conexión con el Fluke VT650. REMOTE")
+                    return
             
-            line = self.serial_conn.readline().decode('utf-8').strip()
-            print(f"confirmando cambio baudrate {type(line)}")
-            print(line)
-            if '*' not in line:
-                QMessageBox.critical(self,"Error", "No se pudo establecer la conexión con el Fluke VT650. UARTFAST-2")
+            else:
+                # Configurar el puerto serial
+                self.serial_conn.write(b'UARTFAST=TRUE\n')
+                time.sleep(0.01)
                 self.serial_conn.close()
-                return
+
+                self.serial_conn = serial.Serial(
+                    port=port,
+                    baudrate=921600,
+                    timeout=1,
+                    rtscts=True
+                )
+                self.serial_conn.reset_input_buffer()
+                self.serial_conn.reset_output_buffer()
+
+                line = self.serial_conn.read(2).decode('utf-8')
+
+                if 'A' in line:
+                    self.serial_conn.write(b'A')
+                    time.sleep(0.01)
+                else:
+                    QMessageBox.critical(self,"Error", "No se pudo establecer la conexión con el Fluke VT650. UARTFAST-1")
+                    self.serial_conn.close()
+                    return    
+                
+                line = self.serial_conn.readline().decode('utf-8').strip()
+                print(f"confirmando cambio baudrate {type(line)}")
+                print(line)
+                if '*' not in line:
+                    QMessageBox.critical(self,"Error", "No se pudo establecer la conexión con el Fluke VT650. UARTFAST-2")
+                    self.serial_conn.close()
+                    return
+
+
 
             # Configurar el equipo
             self.serial_conn.write(b'MEAS=AW\n')
@@ -314,6 +333,11 @@ class VT650App(QMainWindow, Ui_MainWindow):
             self.ax_x.yaxis.set_major_locator(ticker.MaxNLocator(5))
             self.ax_x.relim()
             self.ax_x.autoscale_view()
+            #y_min = self.df["Presion"].min()
+            #y_max = self.df["Presion"].max()
+            #self.ax_x.set_ylim(y_min, y_max)
+
+            
 
             self.ax_y.plot(df_plot["Tiempo"], df_plot["Flujo"], label="Flujo", color='g')
             self.ax_y.set_title('Gráfica de Flujo')
@@ -323,6 +347,9 @@ class VT650App(QMainWindow, Ui_MainWindow):
             self.ax_y.yaxis.set_major_locator(ticker.MaxNLocator(5))
             self.ax_y.relim()
             self.ax_y.autoscale_view()
+            #fmin = self.df["Flujo"].min()
+            #fmax = self.df["Flujo"].max()
+            #self.ax_y.set_ylim(fmin, fmax)
 
 
             self.ax_z.plot(df_plot["Tiempo"], df_plot["Volumen"], label="Volumen", color='b')
