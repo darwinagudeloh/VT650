@@ -1,30 +1,28 @@
 import sys
 import time
-import serial
-import serial.tools.list_ports
 import pandas as pd
 import matplotlib.ticker as ticker
 import matplotlib.pyplot as plt  # Importar pyplot
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QGraphicsScene, QFileDialog
 from PySide6.QtCore import QTimer, QThread, Signal
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 from gui.main_window import Ui_MainWindow
+from hardware import SerialManager, SerialManagerError
 
 class SerialThread(QThread):
     data_received = Signal(str)  # Señal para emitir los datos recibidos
 
-    def __init__(self, serial_conn):
+    def __init__(self, serial_manager):
         super().__init__()
-        self.serial_conn = serial_conn
+        self.serial_manager = serial_manager
         self.running = True
 
     def run(self):
         while self.running:
-            if self.serial_conn.in_waiting > 0:
-                line = self.serial_conn.readline().decode('utf-8').strip()
-                if line:
-                    self.data_received.emit(line)  # Emitir los datos recibidos
+            line = self.serial_manager.read_line()
+            if line:
+                self.data_received.emit(line)
 
     def stop(self):
         self.running = False
@@ -50,8 +48,11 @@ class VT650App(QMainWindow, Ui_MainWindow):
         super().__init__()
         self.setupUi(self)  # load ui file
         
-        # Iniy config
-        self.serial_conn = None
+        # serial port
+        self.serial_manager = SerialManager()
+
+        # Init config
+        #self.serial_conn = None
         self.data = []
         self.df = pd.DataFrame(columns=["Presion", "Flujo", "Volumen", "ID"])
         self.start_time = None
@@ -99,7 +100,7 @@ class VT650App(QMainWindow, Ui_MainWindow):
         self.gvdata.setScene(scene)
 
     def populate_serial_ports(self):
-        ports = sorted(serial.tools.list_ports.comports(), key=lambda port: port.device)
+        ports = self.serial_manager.list_available_ports()
         self.cbserial.clear()  # clear combo box
         default_port = "/dev/ttyUSB0"
         default_index = -1
@@ -161,126 +162,33 @@ class VT650App(QMainWindow, Ui_MainWindow):
             return
 
         try:
-            self.serial_conn = serial.Serial(
-                port=port,
-                baudrate=115200,
-                timeout=1,
-                rtscts=True
-            )
-            self.serial_conn.write(b'REMOTE\n')
-            time.sleep(0.01)
-            line = self.serial_conn.readline().decode('utf-8').strip()
-            if line != 'RMAIN':
-                self.serial_conn.close()
-                                
-                #intentar en ultrafast
-                self.serial_conn = serial.Serial(
-                    port=port,
-                    baudrate=921600,
-                    timeout=1,
-                    rtscts=True
-                )
-                self.serial_conn.reset_input_buffer()
-                self.serial_conn.reset_output_buffer() 
+            port = self.cbserial.currentText()
+            if not self.serial_manager.connect(port, self.samplerate):
+                QMessageBox.critical(self,"Error", "No se pudo establecer la conexión con el Fluke VT650. UARTFAST-2")
+                return
 
-                # Enviar el comando Remote
-                self.serial_conn.write(b'REMOTE\n')
-                time.sleep(0.01)
-                line = self.serial_conn.readline().decode('utf-8').strip()
-                if line != 'RMAIN':
-                    QMessageBox.critical(self, "Error", "No se pudo establecer la conexión con el Fluke VT650. REMOTE")
-                    return
+            print(f"puerto configurado")
+            # Habilitar botones
+            self.bconfig.setEnabled(False)
+            self.bstart.setEnabled(True)
+            QMessageBox.information(self, "Configuración", "Puerto serial configurado correctamente.")
             
-            else:
-                # Configurar el puerto serial
-                self.serial_conn.write(b'UARTFAST=TRUE\n')
-                time.sleep(0.01)
-                self.serial_conn.close()
-
-                self.serial_conn = serial.Serial(
-                    port=port,
-                    baudrate=921600,
-                    timeout=1,
-                    rtscts=True
-                )
-                self.serial_conn.reset_input_buffer()
-                self.serial_conn.reset_output_buffer()
-
-                line = self.serial_conn.read(2).decode('utf-8')
-
-                if 'A' in line:
-                    self.serial_conn.write(b'A')
-                    time.sleep(0.01)
-                else:
-                    QMessageBox.critical(self,"Error", "No se pudo establecer la conexión con el Fluke VT650. UARTFAST-1")
-                    self.serial_conn.close()
-                    return    
-                
-                line = self.serial_conn.readline().decode('utf-8').strip()
-                print(f"confirmando cambio baudrate {type(line)}")
-                print(line)
-                if '*' not in line:
-                    QMessageBox.critical(self,"Error", "No se pudo establecer la conexión con el Fluke VT650. UARTFAST-2")
-                    self.serial_conn.close()
-                    return
-
-
-
             # Configurar el equipo
-            self.serial_conn.write(b'MEAS=AW\n')
-            time.sleep(0.05)
-            line = self.serial_conn.readline().decode('utf-8').strip()
-            if line != '*':
-                QMessageBox.critical(self, "Error", "No se pudo establecer la conexión con el Fluke VT650. MEAS")
-                self.serial_conn.close()
-                return
-            
-            self.serial_conn.write(b'MPRAW=TRUE\n')
-            time.sleep(0.01)
-            line = self.serial_conn.readline().decode('utf-8').strip()
-            if line != '*':
-                QMessageBox.critical(self, "Error", "No se pudo establecer la conexión con el Fluke VT650. MPRAW")
-                self.serial_conn.close()
-                return
-            
-            self.serial_conn.write(b'MFLAW=TRUE\n')
-            time.sleep(0.01)
-            line = self.serial_conn.readline().decode('utf-8').strip()
-            if line != '*':
-                QMessageBox.critical(self, "Error", "No se pudo establecer la conexión con el Fluke VT650. MFLAW")
-                self.serial_conn.close()
-                return
-            
-            self.serial_conn.write(b'MVOL=TRUE\n')
-            time.sleep(0.01)
-            line = self.serial_conn.readline().decode('utf-8').strip()
-            if line != '*':
-                QMessageBox.critical(self, "Error", "No se pudo establecer la conexión con el Fluke VT650. MVOL")
-                self.serial_conn.close()
-                return
-            
-            print("enviando sample")
-            # Configurar el equipo para enviar datos a 20 Hz
-            freq = f'MFREQ={self.samplerate}\n'
-            self.serial_conn.write(freq.encode())
-            time.sleep(0.01)
-            line = self.serial_conn.readline().decode('utf-8').strip()
-            if line != '*':
-                QMessageBox.critical(self, "Error", "No se pudo establecer la conexión con el Fluke VT650. MFREQ")
-                self.serial_conn.close()
-                return
+            # @todo toda esta parte cambiara.
+            # se implementara lectura por comando y no por stream
+            self.serial_manager._configure_device(self.samplerate)
 
             # Habilitar botones
             self.bconfig.setEnabled(False)
             self.bstart.setEnabled(True)
             self.bstop.setEnabled(False)
-            QMessageBox.information(self, "Configuración", "Puerto serial configurado correctamente.")
+            #QMessageBox.information(self, "Configuración", "Puerto serial configurado correctamente.")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo abrir el puerto serial: {e}")
 
     def start_capture(self):
-        if not self.serial_conn:
+        if not self.serial_manager.serial_conn:
             QMessageBox.critical(self, "Error", "Primero configura el puerto serial.")
             return
 
@@ -289,14 +197,14 @@ class VT650App(QMainWindow, Ui_MainWindow):
         self.capturing = True
 
         # Iniciar el hilo para recibir datos
-        self.serial_thread = SerialThread(self.serial_conn)
+        self.serial_thread = SerialThread(self.serial_manager)
         self.serial_thread.data_received.connect(self.process_line)
         self.serial_thread.start()
         self.start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
 
         # Iniciar la captura de datos
-        self.serial_conn.write(b'STREAMIDX\n')
-        self.serial_conn.flush()
+        self.serial_manager.serial_conn.write(b'STREAMIDX\n')
+        self.serial_manager.serial_conn.flush()
 
         # Habilitar/deshabilitar botones
         self.bstart.setEnabled(False)
@@ -364,13 +272,13 @@ class VT650App(QMainWindow, Ui_MainWindow):
             self.canvas.draw()
 
     def stop_capture(self):
-        if not self.serial_conn:
+        if not self.serial_manager.serial_conn:
             QMessageBox.critical(self, "Error", "No hay conexión serial activa.")
             return
 
         self.serial_thread.stop()
         self.plot_thread.stop()
-        #self.serial_conn.write(b'LOCAL\n')
+        #self.serial_manager.serial_conn.write(b'LOCAL\n')
         self.stop_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
 
         # Guardar los datos en un archivo CSV

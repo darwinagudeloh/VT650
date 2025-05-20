@@ -4,3 +4,4 @@ __pycache__/
 src/gui/__pycache__/
 *.pycq
 *.csv
+*.png
